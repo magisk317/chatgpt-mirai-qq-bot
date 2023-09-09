@@ -1,14 +1,6 @@
 import datetime
-import os
-import sys
-
-
-sys.path.append(os.getcwd())
-
 import asyncio
-from typing import Union
-from revChatGPT.V1 import Chatbot as V1Chatbot
-from revChatGPT.Unofficial import Chatbot as BrowserChatbot
+from revChatGPT.V1 import AsyncChatbot as V1Chatbot
 from config import OpenAIAuthBase
 from utils import QueueInfo
 
@@ -18,7 +10,7 @@ class ChatGPTBrowserChatbot(asyncio.Lock):
 
     account: OpenAIAuthBase
 
-    bot: Union[V1Chatbot, BrowserChatbot]
+    bot: V1Chatbot
 
     mode: str
 
@@ -44,31 +36,29 @@ class ChatGPTBrowserChatbot(asyncio.Lock):
         self.accessed_at.append(current_time)
         self.refresh_accessed_at()
 
-    def rename_conversation(self, conversation_id: str, title: str):
-        self.bot.change_title(conversation_id, title)
+    async def rename_conversation(self, conversation_id: str, title: str):
+        await self.bot.change_title(conversation_id, title)
 
     def refresh_accessed_at(self):
         # 删除栈顶过期的信息
         current_time = datetime.datetime.now()
         while len(self.accessed_at) > 0 and current_time - self.accessed_at[0] > datetime.timedelta(hours=1):
             self.accessed_at.pop(0)
+        if len(self.accessed_at) == 0:
+            self.accessed_at.append(current_time)
 
-    def delete_conversation(self, conversation_id):
-        self.bot.delete_conversation(conversation_id)
+    async def delete_conversation(self, conversation_id):
+        await self.bot.delete_conversation(conversation_id)
 
-    def ask(self, prompt, conversation_id=None, parent_id=None):
+    async def ask(self, prompt, conversation_id=None, parent_id=None, model=''):
         """向 ChatGPT 发送提问"""
         # self.queue 已交给 MiddlewareConcurrentLock 处理，此处不处理
         self.bot.conversation_id = conversation_id
         self.bot.parent_id = parent_id
-        resp = self.bot.ask(prompt=prompt, conversation_id=conversation_id, parent_id=parent_id)
-        if self.mode == 'proxy' or self.mode == 'browserless':
-            for r in resp:
-                yield r
-            self.update_accessed_at()
-        else:
-            yield resp
-            self.update_accessed_at()
+        self.bot.config['model'] = model
+        async for r in self.bot.ask(prompt=prompt, conversation_id=conversation_id, parent_id=parent_id):
+            yield r
+        self.update_accessed_at()
 
     def __str__(self) -> str:
         return self.bot.__str__()
